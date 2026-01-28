@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Authentication Attendance System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Face Authentication Attendance</h1>
+            <p class="subtitle">AI-Powered Attendance Management System</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Camera Section -->
+            <div class="camera-section">
+                <div class="video-container">
+                    <video id="video" autoplay playsinline></video>
+                    <canvas id="canvas" style="display:none;"></canvas>
+                    <div id="status-indicator" class="status-indicator"></div>
+                </div>
+
+                <div class="controls">
+                    <button id="startCamera" class="btn btn-primary">Start Camera</button>
+                    <button id="stopCamera" class="btn btn-secondary" disabled>Stop Camera</button>
+                </div>
+            </div>
+
+            <!-- Action Panels -->
+            <div class="action-panels">
+                <!-- Registration Panel -->
+                <div class="panel">
+                    <h2>Register New User</h2>
+                    <div class="form-group">
+                        <input type="text" id="userName" placeholder="Enter your name" class="input-field">
+                        <button id="registerBtn" class="btn btn-success">Register Face</button>
+                    </div>
+                    <div id="registerResult" class="result-box"></div>
+                </div>
+
+                <!-- Authentication Panel -->
+                <div class="panel">
+                    <h2>Mark Attendance</h2>
+                    <button id="authenticateBtn" class="btn btn-primary btn-large">
+                        Authenticate & Punch
+                    </button>
+                    <div id="authResult" class="result-box"></div>
+                </div>
+            </div>
+
+            <!-- Statistics Dashboard -->
+            <div class="dashboard">
+                <div class="stat-card">
+                    <h3>Registered Users</h3>
+                    <div id="userCount" class="stat-value">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Today's Records</h3>
+                    <div id="todayCount" class="stat-value">0</div>
+                </div>
+            </div>
+
+            <!-- Attendance History -->
+            <div class="history-section">
+                <h2>Recent Attendance (Last 7 Days)</h2>
+                <div class="table-container">
+                    <table id="historyTable">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Timestamp</th>
+                                <th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyBody">
+                            <tr>
+                                <td colspan="4" class="no-data">No records found</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <button id="refreshHistory" class="btn btn-secondary">Refresh History</button>
+            </div>
+        </div>
+
+        <footer>
+            <p>Powered by DeepFace & Custom Anti-Spoofing Algorithm</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
