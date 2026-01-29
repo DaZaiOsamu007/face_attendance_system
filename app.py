@@ -1,39 +1,32 @@
 import os
 import cv2
 import numpy as np
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify
 from datetime import datetime
-import json
 import base64
 from deepface import DeepFace
 import sqlite3
 from pathlib import Path
-import threading
 import time
 
 app = Flask(__name__)
 
-# Configuration
 DATABASE_PATH = "database/attendance.db"
 FACES_DIR = "database/faces"
-SPOOFING_THRESHOLD = 0.01  # Unique threshold for texture analysis
+SPOOFING_THRESHOLD = 0.01
 
-# Ensure directories exist
 Path(FACES_DIR).mkdir(parents=True, exist_ok=True)
 Path("database").mkdir(parents=True, exist_ok=True)
 
+
 class AttendanceDB:
-    """Custom database handler for attendance records"""
-    
     def __init__(self):
         self.init_database()
-    
+
     def init_database(self):
-        """Initialize SQLite database with custom schema"""
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
-        
-        # Users table
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,8 +35,7 @@ class AttendanceDB:
                 registered_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
-        # Attendance records table
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS attendance (
                 record_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,12 +46,11 @@ class AttendanceDB:
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
             )
         ''')
-        
+
         conn.commit()
         conn.close()
-    
+
     def register_user(self, name, face_path):
-        """Register new user"""
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         try:
@@ -73,18 +64,16 @@ class AttendanceDB:
             return None
         finally:
             conn.close()
-    
+
     def get_user_by_name(self, name):
-        """Get user details by name"""
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE name = ?", (name,))
         user = cursor.fetchone()
         conn.close()
         return user
-    
+
     def record_attendance(self, user_id, punch_type, confidence):
-        """Record attendance punch"""
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute(
@@ -93,9 +82,8 @@ class AttendanceDB:
         )
         conn.commit()
         conn.close()
-    
+
     def get_today_attendance(self, user_id):
-        """Get today's attendance for a user"""
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute('''
@@ -107,18 +95,16 @@ class AttendanceDB:
         records = cursor.fetchall()
         conn.close()
         return records
-    
+
     def get_all_users(self):
-        """Get all registered users"""
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT user_id, name FROM users")
         users = cursor.fetchall()
         conn.close()
         return users
-    
+
     def get_attendance_history(self, days=7):
-        """Get attendance history for last N days"""
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute('''
@@ -132,114 +118,92 @@ class AttendanceDB:
         conn.close()
         return history
 
-# Initialize database
+
 db = AttendanceDB()
 
+
 class FaceRecognitionSystem:
-    """Custom face recognition implementation"""
-    
     def __init__(self):
-        self.model_name = "Facenet512"  # Using Facenet512 for better accuracy
+        self.model_name = "Facenet512"
         self.distance_metric = "cosine"
         self.detection_backend = "opencv"
-        
+
     def detect_liveness(self, frame):
-        """
-        Custom anti-spoofing using texture analysis
-        Analyzes image sharpness and color distribution
-        """
-        # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Calculate Laplacian variance (sharpness measure)
         laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        
-        # Normalize to 0-1 range
         sharpness_score = min(laplacian_var / 1000, 1.0)
-        
-        # Check color distribution (photos tend to have uniform distribution)
+
         color_std = np.std([
             np.std(frame[:, :, 0]),
             np.std(frame[:, :, 1]),
             np.std(frame[:, :, 2])
         ])
-        
-        # Combined liveness score
+
         liveness_score = (sharpness_score + min(color_std / 100, 1.0)) / 2
-        
         is_live = liveness_score > SPOOFING_THRESHOLD
-        
+
         return is_live, liveness_score
-    
+
     def register_face(self, frame, name):
-        """Register a new face"""
         try:
-            # Check liveness first
             is_live, liveness_score = self.detect_liveness(frame)
-            
+
             if not is_live:
                 return {
                     "success": False,
                     "message": f"Liveness check failed. Please use live camera feed. (Score: {liveness_score:.2f})"
                 }
-            
-            # Save face image
+
             face_path = os.path.join(FACES_DIR, f"{name}_{int(time.time())}.jpg")
             cv2.imwrite(face_path, frame)
-            
-            # Register in database
+
             user_id = db.register_user(name, face_path)
-            
+
             if user_id is None:
                 return {
                     "success": False,
                     "message": "User already exists!"
                 }
-            
+
             return {
                 "success": True,
                 "message": f"User {name} registered successfully!",
                 "user_id": user_id,
                 "liveness_score": liveness_score
             }
-            
+
         except Exception as e:
             return {
                 "success": False,
                 "message": f"Error during registration: {str(e)}"
             }
-    
+
     def recognize_face(self, frame):
-        """Recognize face and determine attendance action"""
         try:
-            # Check liveness
             is_live, liveness_score = self.detect_liveness(frame)
-            
+
             if not is_live:
                 return {
                     "success": False,
                     "message": f"Spoof detected! Liveness score: {liveness_score:.2f}"
                 }
-            
-            # Get all registered users
+
             users = db.get_all_users()
-            
+
             if not users:
                 return {
                     "success": False,
                     "message": "No registered users found!"
                 }
-            
+
             best_match = None
             best_distance = float('inf')
-            
-            # Compare with each registered face
+
             for user_id, name in users:
                 user_data = db.get_user_by_name(name)
                 face_path = user_data[2]
-                
+
                 try:
-                    # Use DeepFace to verify
                     result = DeepFace.verify(
                         img1_path=frame,
                         img2_path=face_path,
@@ -248,38 +212,36 @@ class FaceRecognitionSystem:
                         detector_backend=self.detection_backend,
                         enforce_detection=False
                     )
-                    
+
                     distance = result['distance']
-                    
+
                     if distance < best_distance and result['verified']:
                         best_distance = distance
                         best_match = (user_id, name)
-                        
-                except Exception as e:
+
+                except Exception:
                     continue
-            
+
             if best_match is None:
                 return {
                     "success": False,
                     "message": "Face not recognized!"
                 }
-            
+
             user_id, name = best_match
             confidence = 1 - best_distance
-            
-            # Determine punch type
+
             today_records = db.get_today_attendance(user_id)
-            
+
             if not today_records:
                 punch_type = "PUNCH-IN"
             elif today_records[0][0] == "PUNCH-IN":
                 punch_type = "PUNCH-OUT"
             else:
                 punch_type = "PUNCH-IN"
-            
-            # Record attendance
+
             db.record_attendance(user_id, punch_type, confidence)
-            
+
             return {
                 "success": True,
                 "name": name,
@@ -288,68 +250,65 @@ class FaceRecognitionSystem:
                 "liveness_score": liveness_score,
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            
+
         except Exception as e:
             return {
                 "success": False,
                 "message": f"Recognition error: {str(e)}"
             }
 
-# Initialize face recognition system
+
 face_system = FaceRecognitionSystem()
 
-# Routes
+
 @app.route('/')
 def index():
-    """Main page"""
     return render_template('index.html')
+
 
 @app.route('/register', methods=['POST'])
 def register():
-    """Register new user"""
     try:
         data = request.json
         name = data.get('name')
         image_data = data.get('image')
-        
-        # Decode base64 image
+
         image_bytes = base64.b64decode(image_data.split(',')[1])
         nparr = np.frombuffer(image_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+
         result = face_system.register_face(frame, name)
         return jsonify(result)
-        
+
     except Exception as e:
         return jsonify({
             "success": False,
             "message": f"Server error: {str(e)}"
         })
+
 
 @app.route('/authenticate', methods=['POST'])
 def authenticate():
-    """Authenticate user and mark attendance"""
     try:
         data = request.json
         image_data = data.get('image')
-        
-        # Decode base64 image
+
         image_bytes = base64.b64decode(image_data.split(',')[1])
         nparr = np.frombuffer(image_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+
         result = face_system.recognize_face(frame)
         return jsonify(result)
-        
+
     except Exception as e:
         return jsonify({
             "success": False,
             "message": f"Server error: {str(e)}"
         })
 
+
 @app.route('/history')
 def history():
-    """Get attendance history"""
     try:
         records = db.get_attendance_history(days=7)
         history_data = [
@@ -365,9 +324,9 @@ def history():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
+
 @app.route('/users')
 def users():
-    """Get all registered users"""
     try:
         users_list = db.get_all_users()
         return jsonify({
@@ -377,8 +336,8 @@ def users():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
-if __name__ == '__main__':
-    print("🚀 Face Authentication Attendance System Starting...")
-    print("📍 Navigate to http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000)
 
+if __name__ == '__main__':
+    print("Face Authentication Attendance System Starting...")
+    print("Navigate to http://localhost:5000")
+    app.run(debug=True, host='0.0.0.0', port=5000)
